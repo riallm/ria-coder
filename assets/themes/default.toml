@@ -1,0 +1,22 @@
+[theme]
+name = "default"
+
+[theme.colors]
+user_message = "white"
+agent_message = "cyan"
+status_text = "yellow"
+success = "green"
+error = "red"
+warning = "yellow"
+file_path = "blue"
+code_added = "green"
+code_removed = "red"
+border = "bright_black"
+background = "reset"
+foreground = "reset"
+current_line = "bright_black"
+line_number = "bright_black"
+selection = "blue"
+
+[syntax]
+theme = "base16-ocean.dark"

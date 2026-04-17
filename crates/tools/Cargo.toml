@@ -1,0 +1,18 @@
+[package]
+name = "ria-tools"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Tool integration layer for Ria Coder"
+
+[dependencies]
+ria-config.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+ignore.workspace = true
+walkdir.workspace = true
+chrono.workspace = true
+# gix = { workspace = true, optional = true }

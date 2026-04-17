@@ -1,0 +1,23 @@
+[package]
+name = "ria-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Ria Coder CLI binary"
+
+[[bin]]
+name = "ria"
+path = "src/main.rs"
+
+[dependencies]
+ria-tui.workspace = true
+ria-agent.workspace = true
+ria-tools.workspace = true
+ria-config.workspace = true
+ria-gguf.workspace = true
+ria-core.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

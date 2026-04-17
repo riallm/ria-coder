@@ -1,0 +1,18 @@
+[package]
+name = "ria-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Terminal User Interface for Ria Coder"
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+tree-sitter.workspace = true
+syntect.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+strum.workspace = true
+ria-config.workspace = true
