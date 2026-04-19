@@ -1,14 +1,17 @@
 //! File Preview Panel - Syntax-highlighted code view (SPEC-012)
 
-use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::{
+    layout::Rect,
+    widgets::{Block, Borders, Paragraph},
+    Frame,
+};
 
 #[derive(Debug)]
 pub struct FilePreviewPanel {
-    current_file: Option<String>,
-    content: String,
-    cursor_line: usize,
-    scroll_offset: usize,
+    pub current_file: Option<String>,
+    pub content: String,
+    pub cursor_line: usize,
+    pub scroll_offset: usize,
 }
 
 impl FilePreviewPanel {
@@ -26,6 +29,13 @@ impl FilePreviewPanel {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        // Render file with syntax highlighting
+        let title = format!(
+            "Preview: {}",
+            self.current_file.as_deref().unwrap_or("No file")
+        );
+        let block = Block::default().borders(Borders::ALL).title(title);
+
+        let paragraph = Paragraph::new(self.content.as_str()).block(block);
+        frame.render_widget(paragraph, area);
     }
 }

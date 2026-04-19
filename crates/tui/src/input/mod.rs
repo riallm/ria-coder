@@ -1,7 +1,7 @@
 //! Command Bar - Input area (SPEC-014)
 
-use reedline::{Reedline, Signal};
 use anyhow::Result;
+use reedline::{DefaultPrompt, Reedline, Signal};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputMode {
@@ -16,6 +16,7 @@ pub struct CommandBar {
     pub editor: Reedline,
     pub history: Vec<String>,
     pub history_index: usize,
+    pub prompt: DefaultPrompt,
 }
 
 impl CommandBar {
@@ -25,11 +26,12 @@ impl CommandBar {
             editor: Reedline::create(),
             history: Vec::new(),
             history_index: 0,
+            prompt: DefaultPrompt::default(),
         }
     }
 
     pub fn read_line(&mut self) -> Result<Option<String>> {
-        let signal = self.editor.read_line()?;
+        let signal = self.editor.read_line(&self.prompt)?;
         match signal {
             Signal::Success(buffer) => {
                 self.history.push(buffer.clone());

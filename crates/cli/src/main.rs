@@ -2,8 +2,9 @@
 //!
 //! Terminal-based agentic coding system
 
-use clap::{Parser, Subcommand};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "ria")]
@@ -40,6 +41,10 @@ enum Commands {
         /// Path to GGUF model file
         #[arg(short, long)]
         model: Option<String>,
+
+        /// Project root directory
+        #[arg(short, long)]
+        root: Option<String>,
 
         /// Prompt text
         #[arg(short, long)]
@@ -83,19 +88,36 @@ async fn main() -> Result<()> {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("ria=info".parse()?)
+            tracing_subscriber::EnvFilter::from_default_env().add_directive("ria=info".parse()?),
         )
         .init();
 
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Coder { model, root, theme, vim } => {
+        Commands::Coder {
+            model,
+            root,
+            theme,
+            vim,
+        } => {
             cmd_coder(model.as_deref(), root.as_deref(), &theme, vim).await?;
         }
-        Commands::Generate { model, prompt, max_tokens, temperature } => {
-            cmd_generate(model.as_deref(), &prompt, max_tokens, temperature).await?;
+        Commands::Generate {
+            model,
+            root,
+            prompt,
+            max_tokens,
+            temperature,
+        } => {
+            cmd_generate(
+                model.as_deref(),
+                root.as_deref(),
+                &prompt,
+                max_tokens,
+                temperature,
+            )
+            .await?;
         }
         Commands::Inspect { model } => {
             cmd_inspect(&model)?;
@@ -116,40 +138,65 @@ async fn main() -> Result<()> {
 
 /// Start interactive coding session
 async fn cmd_coder(
-    model: Option<&str>,
+    _model: Option<&str>,
     root: Option<&str>,
-    theme: &str,
-    vim: bool,
+    _theme: &str,
+    _vim: bool,
 ) -> Result<()> {
-    println!("⚡ Ria Coder v{}", env!("CARGO_PKG_VERSION"));
-    println!("📁 Project: {}", root.unwrap_or("."));
-    println!("🤖 Model: {}", model.unwrap_or("ria-8b-q4_k_m.gguf"));
-    println!("🎨 Theme: {}", theme);
-    if vim { println!("⌨️  Vim mode: enabled"); }
-    println!();
-    println!("Starting interactive session...");
+    use ria_agent::llm::MockLLMEngine;
+    use ria_agent::orchestrator::AgentOrchestrator;
+    use ria_tui::{App, Theme};
 
-    // Initialize TUI
-    // Load model via riallm
-    // Start main loop
+    let project_root = match root {
+        Some(r) => PathBuf::from(r),
+        None => std::env::current_dir()?,
+    };
+
+    let theme = Theme::default();
+    let llm = Box::new(MockLLMEngine::new());
+    let orchestrator = AgentOrchestrator::new(llm);
+
+    let mut app = App::new(theme, project_root, orchestrator)?;
+
+    app.run()?;
 
     Ok(())
 }
 
 /// Generate code from prompt
 async fn cmd_generate(
-    model: Option<&str>,
+    _model: Option<&str>,
+    root: Option<&str>,
     prompt: &str,
-    max_tokens: usize,
+    _max_tokens: usize,
     temperature: f64,
 ) -> Result<()> {
-    println!("🤖 Generating with {} (temp={})...", 
-        model.unwrap_or("ria-8b"), temperature);
-    println!("Prompt: {}", prompt);
+    use ria_agent::llm::MockLLMEngine;
+    use ria_agent::orchestrator::AgentOrchestrator;
 
-    // Load model
-    // Generate response
-    // Print output
+    let project_root = match root {
+        Some(r) => PathBuf::from(r),
+        None => std::env::current_dir()?,
+    };
+
+    println!("🤖 Generating with mock-ria-8b (temp={})...", temperature);
+    println!("📁 Project: {:?}", project_root);
+    println!("Prompt: {}", prompt);
+    println!();
+
+    let llm = Box::new(MockLLMEngine::new());
+    let mut orchestrator = AgentOrchestrator::new(llm);
+    orchestrator.init(project_root)?;
+
+    let output = orchestrator.process_request(prompt).await?;
+
+    println!("---");
+    println!("{}", output.message);
+    println!("---");
+    println!(
+        "Changes: {}, Tests passed: {:?}",
+        output.changes_made, output.tests_passed
+    );
 
     Ok(())
 }

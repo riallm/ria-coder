@@ -60,16 +60,56 @@ impl Default for KeyBindings {
     fn default() -> Self {
         Self {
             bindings: vec![
-                KeyBinding { key: KeyCode::F(1), modifiers: KeyModifiers::NONE, action: Action::Help },
-                KeyBinding { key: KeyCode::F(2), modifiers: KeyModifiers::NONE, action: Action::FileBrowser },
-                KeyBinding { key: KeyCode::F(3), modifiers: KeyModifiers::NONE, action: Action::GitStatus },
-                KeyBinding { key: KeyCode::F(4), modifiers: KeyModifiers::NONE, action: Action::Build },
-                KeyBinding { key: KeyCode::F(5), modifiers: KeyModifiers::NONE, action: Action::Test },
-                KeyBinding { key: KeyCode::F(6), modifiers: KeyModifiers::NONE, action: Action::AcceptChanges },
-                KeyBinding { key: KeyCode::F(7), modifiers: KeyModifiers::NONE, action: Action::RejectChanges },
-                KeyBinding { key: KeyCode::F(10), modifiers: KeyModifiers::NONE, action: Action::Quit },
-                KeyBinding { key: KeyCode::Esc, modifiers: KeyModifiers::NONE, action: Action::Cancel },
-                KeyBinding { key: KeyCode::Enter, modifiers: KeyModifiers::NONE, action: Action::SendMessage },
+                KeyBinding {
+                    key: KeyCode::F(1),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::Help,
+                },
+                KeyBinding {
+                    key: KeyCode::F(2),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::FileBrowser,
+                },
+                KeyBinding {
+                    key: KeyCode::F(3),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::GitStatus,
+                },
+                KeyBinding {
+                    key: KeyCode::F(4),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::Build,
+                },
+                KeyBinding {
+                    key: KeyCode::F(5),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::Test,
+                },
+                KeyBinding {
+                    key: KeyCode::F(6),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::AcceptChanges,
+                },
+                KeyBinding {
+                    key: KeyCode::F(7),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::RejectChanges,
+                },
+                KeyBinding {
+                    key: KeyCode::F(10),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::Quit,
+                },
+                KeyBinding {
+                    key: KeyCode::Esc,
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::Cancel,
+                },
+                KeyBinding {
+                    key: KeyCode::Enter,
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::SendMessage,
+                },
             ],
             vim_mode: false,
         }
@@ -78,7 +118,8 @@ impl Default for KeyBindings {
 
 impl KeyBindings {
     pub fn find_action(&self, event: &KeyEvent) -> Option<Action> {
-        self.bindings.iter()
+        self.bindings
+            .iter()
             .find(|b| b.key == event.code && b.modifiers == event.modifiers)
             .map(|b| b.action.clone())
     }

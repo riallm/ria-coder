@@ -25,7 +25,10 @@ ria-cli = { path = "crates/cli" }
 
 # RIA Platform
 ria-gguf = { path = "../ria-platform/crates/gguf" }
-ria-core = { path = "../ria-platform/crates/core" }
+ria-inference-core = { path = "../ria-platform/crates/core" }
+ria-core = { path = "../ria/crates/ria-core" }
+riallm = { path = "../riallm" }
+ria-tokenizer = { path = "../ria/crates/ria-tokenizer" }
 
 # TUI
 ratatui = { version = "0.29", features = ["crossterm"] }

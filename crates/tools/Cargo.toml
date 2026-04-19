@@ -15,4 +15,6 @@ serde.workspace = true
 ignore.workspace = true
 walkdir.workspace = true
 chrono.workspace = true
-# gix = { workspace = true, optional = true }
+strum = { workspace = true, features = ["derive"] }
+notify = { workspace = true }
+# gix = { workspace = true }

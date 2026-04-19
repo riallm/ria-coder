@@ -49,14 +49,14 @@ pub struct SyntaxHighlighter {
 }
 
 impl SyntaxHighlighter {
-    pub fn new(theme: &str) -> Self {
+    pub fn new(_theme: &str) -> Self {
         // Initialize syntect highlighter with theme
         Self {
             theme: SyntectTheme::default(),
         }
     }
 
-    pub fn highlight(&self, code: &str, language: &Language) -> Vec<StyledLine> {
+    pub fn highlight(&self, _code: &str, _language: &Language) -> Vec<StyledLine> {
         // Return syntax-highlighted lines
         Vec::new()
     }

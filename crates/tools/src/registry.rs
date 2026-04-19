@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 
 /// Tool categories
-#[derive(Debug, Clone, PartialEq, strum::Display)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, strum::Display)]
 pub enum ToolCategory {
     FileSystem,
     VersionControl,
@@ -40,21 +40,34 @@ pub struct ToolRegistry {
 
 impl ToolRegistry {
     pub fn new() -> Self {
-        Self {
+        let mut registry = Self {
             tools: HashMap::new(),
             categories: HashMap::new(),
-        }
+        };
+
+        registry.register(Box::new(crate::filesystem::FileSystemTools::new()));
+        registry.register(Box::new(crate::process::ProcessTools::new()));
+        registry.register(Box::new(crate::git::GitTools::new()));
+        registry.register(Box::new(crate::build::BuildTools::new()));
+        registry.register(Box::new(crate::test::TestTools::new()));
+
+        registry
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
         let name = tool.name().to_string();
         let category = tool.category();
-        self.categories.entry(category).or_default().push(name.clone());
+        self.categories
+            .entry(category)
+            .or_default()
+            .push(name.clone());
         self.tools.insert(name, tool);
     }
 
     pub fn execute(&self, name: &str, args: &HashMap<String, String>) -> Result<ToolOutput> {
-        let tool = self.tools.get(name)
+        let tool = self
+            .tools
+            .get(name)
             .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", name))?;
         tool.execute(args)
     }

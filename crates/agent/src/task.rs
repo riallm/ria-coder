@@ -3,7 +3,7 @@
 use anyhow::Result;
 
 /// Structured task representation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Task {
     pub intent: TaskIntent,
     pub targets: Vec<TargetSpec>,
@@ -12,7 +12,7 @@ pub struct Task {
 }
 
 /// What the user wants to do
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TaskIntent {
     Explain,
     Modify { description: String },
@@ -26,7 +26,7 @@ pub enum TaskIntent {
 }
 
 /// Target file or symbol
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TargetSpec {
     pub path: Option<String>,
     pub symbol: Option<String>,
@@ -34,7 +34,7 @@ pub struct TargetSpec {
 }
 
 /// Task constraints
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Constraint {
     KeepApiStable,
     Language(String),
@@ -48,9 +48,39 @@ pub struct TaskParser;
 
 impl TaskParser {
     pub fn parse(input: &str) -> Result<Task> {
-        // Parse natural language to structured task
+        let input_lower = input.to_lowercase();
+
+        let intent = if input_lower.starts_with("explain") {
+            TaskIntent::Explain
+        } else if input_lower.starts_with("create") {
+            let path = input
+                .split_whitespace()
+                .nth(1)
+                .unwrap_or("new_file.rs")
+                .to_string();
+            TaskIntent::Create {
+                path,
+                description: input.to_string(),
+            }
+        } else if input_lower.starts_with("refactor") {
+            TaskIntent::Refactor {
+                description: input.to_string(),
+            }
+        } else if input_lower.starts_with("debug") {
+            TaskIntent::Debug {
+                symptom: input.to_string(),
+            }
+        } else if input_lower.starts_with("test") {
+            let target = input.split_whitespace().nth(1).unwrap_or("").to_string();
+            TaskIntent::Test { target }
+        } else {
+            TaskIntent::Modify {
+                description: input.to_string(),
+            }
+        };
+
         Ok(Task {
-            intent: TaskIntent::Modify { description: input.to_string() },
+            intent,
             targets: Vec::new(),
             constraints: Vec::new(),
             context_hints: Vec::new(),

@@ -1,7 +1,10 @@
 //! Agent Status Panel - Real-time state visualization (SPEC-013)
 
-use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::{
+    layout::Rect,
+    widgets::{Block, Borders, Paragraph},
+    Frame,
+};
 
 #[derive(Debug)]
 pub struct AgentStatusPanel {
@@ -24,6 +27,16 @@ impl AgentStatusPanel {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        // Render status bar
+        let content = format!(
+            "📊 Tokens: {:.1}/s  │  🧠 Mem: {:.1}GB  │  ⚡ Files: {}  │  🔄 Changes: {}",
+            self.token_speed,
+            self.memory_mb / 1024.0,
+            self.files_in_context,
+            self.pending_changes
+        );
+        frame.render_widget(
+            Paragraph::new(content).block(Block::default().borders(Borders::NONE)),
+            area,
+        );
     }
 }

@@ -1,27 +1,39 @@
 //! Verification Engine (SPEC-025)
 
-use anyhow::Result;
 use crate::execution::ChangeSet;
+use anyhow::Result;
+use ria_tools::registry::ToolRegistry;
+
+/// Verification status
+#[derive(Debug, Clone, PartialEq)]
+pub enum VerificationStatus {
+    Pass,
+    Warning { messages: Vec<String> },
+    Fail { errors: Vec<String> },
+}
 
 /// Verification result
 #[derive(Debug)]
 pub struct VerificationResult {
-    build_pass: bool,
-    test_pass: bool,
-    lint_pass: bool,
-    test_count: Option<usize>,
+    pub status: VerificationStatus,
+    pub build_pass: bool,
+    pub test_pass: bool,
+    pub lint_pass: bool,
+    pub test_count: Option<usize>,
 }
 
 impl VerificationResult {
     pub fn passed(&self) -> bool {
-        self.build_pass && self.test_pass && self.lint_pass
+        self.status == VerificationStatus::Pass
     }
 
     pub fn summary(&self) -> String {
-        if self.passed() {
-            "All checks passed".to_string()
-        } else {
-            "Some checks failed".to_string()
+        match &self.status {
+            VerificationStatus::Pass => "All checks passed".to_string(),
+            VerificationStatus::Warning { messages } => {
+                format!("Passed with {} warnings", messages.len())
+            }
+            VerificationStatus::Fail { errors } => format!("Failed with {} errors", errors.len()),
         }
     }
 
@@ -31,18 +43,28 @@ impl VerificationResult {
 }
 
 /// Verification engine
-pub struct VerificationEngine;
+pub struct VerificationEngine {
+    pub tools: ToolRegistry,
+}
 
 impl VerificationEngine {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self {
+            tools: ToolRegistry::new(),
+        }
+    }
 
     /// Verify a change set
-    pub fn verify(&self, _changes: &ChangeSet) -> Result<VerificationResult> {
+    pub async fn verify(&self, _changes: &ChangeSet) -> Result<VerificationResult> {
+        // In a real implementation, we would call tools here
+        // e.g., self.tools.execute("cargo", &args)?
+
         Ok(VerificationResult {
+            status: VerificationStatus::Pass,
             build_pass: true,
             test_pass: true,
             lint_pass: true,
-            test_count: None,
+            test_count: Some(0),
         })
     }
 }

@@ -10,12 +10,12 @@
 //! - Color Themes (SPEC-017)
 
 pub mod app;
-pub mod panels;
 pub mod input;
-pub mod theme;
 pub mod keybindings;
+pub mod panels;
 pub mod syntax;
+pub mod theme;
 
 pub use app::App;
-pub use theme::Theme;
 pub use keybindings::KeyBindings;
+pub use theme::Theme;

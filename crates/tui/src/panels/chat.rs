@@ -1,12 +1,15 @@
 //! Chat Panel - Conversation with agent (SPEC-011)
 
-use ratatui::Frame;
-use ratatui::layout::Rect;
+use ratatui::{
+    layout::Rect,
+    widgets::{Block, Borders, List, ListItem},
+    Frame,
+};
 
 #[derive(Debug)]
 pub struct ChatPanel {
-    messages: Vec<ChatMessage>,
-    scroll_offset: usize,
+    pub messages: Vec<ChatMessage>,
+    pub scroll_offset: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -37,6 +40,24 @@ impl ChatPanel {
     }
 
     pub fn render(&self, frame: &mut Frame, area: Rect) {
-        // Render chat panel with messages
+        let block = Block::default().borders(Borders::ALL).title("Chat");
+
+        let items: Vec<ListItem> = self
+            .messages
+            .iter()
+            .map(|msg| {
+                let prefix = match msg.sender {
+                    MessageSender::User => "👤 You: ",
+                    MessageSender::Agent => "🤖 RIA: ",
+                    MessageSender::Status => "ℹ️ ",
+                    MessageSender::Success => "✅ ",
+                    MessageSender::Error => "❌ ",
+                };
+                ListItem::new(format!("{}{}", prefix, msg.content))
+            })
+            .collect();
+
+        let list = List::new(items).block(block);
+        frame.render_widget(list, area);
     }
 }
