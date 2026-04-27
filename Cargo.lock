@@ -2561,6 +2561,7 @@ dependencies = [
  "candle-core",
  "chrono",
  "futures",
+ "ignore",
  "ria-config",
  "ria-core",
  "ria-gguf",
@@ -2572,6 +2573,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "toml",
  "tracing",
  "walkdir",
 ]
@@ -2684,6 +2686,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "ignore",
  "notify",
  "ratatui",
  "reedline",

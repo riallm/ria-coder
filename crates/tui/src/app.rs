@@ -6,7 +6,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
 use std::path::PathBuf;
@@ -14,8 +14,10 @@ use std::path::PathBuf;
 use crate::input::CommandBar;
 use crate::keybindings::{Action, KeyBindings};
 use crate::panels::{
-    AgentStatusPanel, ChatPanel, DiffPanel, FilePreviewPanel, MessageSender, OutputLogPanel,
+    AgentStatusPanel, ChatPanel, DiffPanel, FileBrowserPanel, FilePreviewPanel, GitStatusPanel,
+    MessageSender, OutputLogPanel,
 };
+use crate::syntax::SyntaxHighlighter;
 use crate::theme::Theme;
 use ria_agent::orchestrator::AgentOrchestrator;
 use ria_agent::state::AgentState;
@@ -35,12 +37,16 @@ pub struct App {
     pub diff_panel: DiffPanel,
     pub status_panel: AgentStatusPanel,
     pub output_panel: OutputLogPanel,
+    pub file_browser: FileBrowserPanel,
+    pub git_status: GitStatusPanel,
     /// Input
     pub command_bar: CommandBar,
     /// Theme
     pub theme: Theme,
     /// Key bindings
     pub keybindings: KeyBindings,
+    /// Syntax Highlighter
+    pub highlighter: SyntaxHighlighter,
     /// Agent
     pub orchestrator: AgentOrchestrator,
     /// File Watcher
@@ -76,9 +82,10 @@ impl App {
         orchestrator: AgentOrchestrator,
     ) -> Result<Self> {
         let watcher = FileWatcher::new()?;
+        let highlighter = SyntaxHighlighter::new("base16-ocean.dark");
 
         Ok(Self {
-            project_root,
+            project_root: project_root.clone(),
             mode: AppMode::Default,
             input_buffer: String::new(),
             chat_panel: ChatPanel::new(),
@@ -86,9 +93,12 @@ impl App {
             diff_panel: DiffPanel::new(),
             status_panel: AgentStatusPanel::new(),
             output_panel: OutputLogPanel::new(),
+            file_browser: FileBrowserPanel::new(project_root),
+            git_status: GitStatusPanel::new(),
             command_bar: CommandBar::new(),
             theme,
             keybindings: KeyBindings::default(),
+            highlighter,
             orchestrator,
             watcher,
             running: true,
@@ -187,8 +197,22 @@ impl App {
             match action {
                 Action::Quit => self.running = false,
                 Action::Help => self.mode = AppMode::Help,
-                Action::FileBrowser => self.mode = AppMode::FileBrowser,
-                Action::GitStatus => self.mode = AppMode::GitStatus,
+                Action::FileBrowser => {
+                    if self.mode == AppMode::FileBrowser {
+                        self.mode = AppMode::Default;
+                    } else {
+                        self.file_browser.refresh();
+                        self.mode = AppMode::FileBrowser;
+                    }
+                }
+                Action::GitStatus => {
+                    if self.mode == AppMode::GitStatus {
+                        self.mode = AppMode::Default;
+                    } else {
+                        self.git_status.refresh(&self.orchestrator.executor.tools);
+                        self.mode = AppMode::GitStatus;
+                    }
+                }
                 Action::Cancel => self.mode = AppMode::Default,
                 Action::AcceptChanges => {
                     if let AgentState::Presenting(_) = &self.orchestrator.state {
@@ -231,15 +255,41 @@ impl App {
             return;
         }
 
-        // Fallback for regular typing
-        match key.code {
-            KeyCode::Char(c) => {
-                self.input_buffer.push(c);
+        // Special handling for panels when active
+        match self.mode {
+            AppMode::FileBrowser => match key.code {
+                KeyCode::Down => self.file_browser.next(),
+                KeyCode::Up => self.file_browser.previous(),
+                KeyCode::Enter => {
+                    if let Some(path) = self.file_browser.selected_item() {
+                        let rel_path = path.to_string_lossy().to_string();
+                        let full_path = self.project_root.join(path);
+                        if let Ok(content) = std::fs::read_to_string(&full_path) {
+                            self.file_panel.open_file(&rel_path);
+                            self.file_panel.content = content;
+                            self.mode = AppMode::Default;
+                        }
+                    }
+                }
+                _ => {}
+            },
+            AppMode::GitStatus => match key.code {
+                KeyCode::Down => self.git_status.next(),
+                KeyCode::Up => self.git_status.previous(),
+                _ => {}
+            },
+            _ => {
+                // Fallback for regular typing
+                match key.code {
+                    KeyCode::Char(c) => {
+                        self.input_buffer.push(c);
+                    }
+                    KeyCode::Backspace => {
+                        self.input_buffer.pop();
+                    }
+                    _ => {}
+                }
             }
-            KeyCode::Backspace => {
-                self.input_buffer.pop();
-            }
-            _ => {}
         }
     }
 
@@ -283,14 +333,14 @@ impl App {
     }
 
     /// Render the UI
-    pub fn render(&self, frame: &mut Frame) {
+    pub fn render(&mut self, frame: &mut Frame) {
         match self.mode {
             AppMode::Default => self.render_default(frame),
             AppMode::FullChat => self.render_full_chat(frame),
             AppMode::FullFile => self.render_full_file(frame),
             AppMode::FullDiff => self.render_full_diff(frame),
-            AppMode::FileBrowser => self.render_file_browser(frame),
-            AppMode::GitStatus => self.render_git_status(frame),
+            AppMode::FileBrowser => self.render_file_browser_overlay(frame),
+            AppMode::GitStatus => self.render_git_status_overlay(frame),
             AppMode::Help => self.render_help(frame),
         }
     }
@@ -329,7 +379,8 @@ impl App {
             ])
             .split(main_chunks[1]);
 
-        self.file_panel.render(frame, right_chunks[0]);
+        self.file_panel
+            .render(frame, right_chunks[0], &self.highlighter);
         self.diff_panel.render(frame, right_chunks[1]);
 
         // Status bar
@@ -347,6 +398,20 @@ impl App {
             Paragraph::new("F1:Help  F2:Files  F3:Git  F4:Build  F10:Quit"),
             chunks[4],
         );
+    }
+
+    fn render_file_browser_overlay(&mut self, frame: &mut Frame) {
+        self.render_default(frame);
+        let area = centered_rect(60, 60, frame.area());
+        frame.render_widget(Clear, area);
+        self.file_browser.render(frame, area);
+    }
+
+    fn render_git_status_overlay(&mut self, frame: &mut Frame) {
+        self.render_default(frame);
+        let area = centered_rect(60, 60, frame.area());
+        frame.render_widget(Clear, area);
+        self.git_status.render(frame, area);
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
@@ -385,7 +450,26 @@ impl App {
     fn render_full_chat(&self, _frame: &mut Frame) {}
     fn render_full_file(&self, _frame: &mut Frame) {}
     fn render_full_diff(&self, _frame: &mut Frame) {}
-    fn render_file_browser(&self, _frame: &mut Frame) {}
-    fn render_git_status(&self, _frame: &mut Frame) {}
     fn render_help(&self, _frame: &mut Frame) {}
+}
+
+/// helper function to create a centered rect using up certain percentage of the available rect `r`
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }

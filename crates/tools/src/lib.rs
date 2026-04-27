@@ -10,15 +10,19 @@
 pub mod build;
 pub mod filesystem;
 pub mod git;
+pub mod lint;
 pub mod process;
 pub mod registry;
+pub mod search;
 pub mod test;
 pub mod watcher;
 
 pub use build::BuildTools;
 pub use filesystem::FileSystemTools;
 pub use git::GitTools;
+pub use lint::LintTools;
 pub use process::ProcessTools;
 pub use registry::ToolRegistry;
+pub use search::SearchTools;
 pub use test::TestTools;
 pub use watcher::FileWatcher;

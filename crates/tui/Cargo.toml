@@ -15,6 +15,7 @@ tracing.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 strum.workspace = true
+ignore.workspace = true
 ria-config.workspace = true
 ria-agent = { path = "../agent" }
 ria-tools = { path = "../tools" }

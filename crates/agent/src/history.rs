@@ -37,6 +37,10 @@ impl ConversationHistory {
             content,
             timestamp: chrono::Utc::now(),
         });
+        if self.messages.len() > self.max_messages {
+            let overflow = self.messages.len() - self.max_messages;
+            self.messages.drain(0..overflow);
+        }
     }
 
     pub fn messages(&self) -> &[Message] {

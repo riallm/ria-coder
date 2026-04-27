@@ -36,6 +36,9 @@ impl Tool for ProcessTools {
         let start = std::time::Instant::now();
 
         let mut command = Command::new(command_str);
+        if let Some(cwd) = args.get("cwd") {
+            command.current_dir(cwd);
+        }
         for arg in args_str.split_whitespace() {
             command.arg(arg);
         }

@@ -10,10 +10,12 @@ use crate::state::{
     AgentResult, AgentState, ErrorState, ExecutingState, PlanningState, PresentingState,
     UnderstandingState, VerifyingState,
 };
+use crate::task::TaskParser;
 use crate::verification::VerificationEngine;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tracing::{info, warn};
 
 /// Central agent orchestrator
 pub struct AgentOrchestrator {
@@ -60,7 +62,9 @@ impl AgentOrchestrator {
 
     /// Initialize with project root
     pub fn init(&mut self, root: PathBuf) -> Result<()> {
-        self.context.init(root)?;
+        self.context.init(root.clone())?;
+        self.executor.set_root(root.clone());
+        self.verifier.set_root(root);
         self.plugins.init_all()?;
         self.plugins.register_all_tools(&mut self.executor.tools);
         self.plugins.register_all_tools(&mut self.verifier.tools);
@@ -70,29 +74,35 @@ impl AgentOrchestrator {
     /// Process a user request (SPEC-020 Section 4)
     pub async fn process_request(&mut self, input: &str) -> Result<AgentOutput> {
         // 0. Safety Layer 0: Auto-stash (SPEC-040)
+        info!("Safety Layer 0: auto-stashing");
         self.auto_stash("ria-coder pre-task backup")?;
 
         // 1. Understanding
+        info!("Step 1: understanding request");
         self.update_state(AgentState::Understanding(UnderstandingState {
             request: input.to_string(),
             parsed: None,
         }));
 
-        let task = match self.planner.parse(input) {
+        // Try LLM parsing, fallback to simple parsing
+        let task = match TaskParser::parse_llm(input, self.llm.as_ref()).await {
             Ok(t) => {
-                self.update_state(AgentState::Understanding(UnderstandingState {
-                    request: input.to_string(),
-                    parsed: Some(t.clone()),
-                }));
+                info!(?t.intent, "Parsed task via LLM");
                 t
             }
             Err(e) => {
-                self.handle_error(format!("Failed to parse task: {}", e), false);
-                return Err(e);
+                warn!("LLM parsing failed: {e}. Falling back to simple parser.");
+                self.planner.parse(input)?
             }
         };
 
+        self.update_state(AgentState::Understanding(UnderstandingState {
+            request: input.to_string(),
+            parsed: Some(task.clone()),
+        }));
+
         // 2. Planning
+        info!("Step 2: planning");
         self.update_state(AgentState::Planning(PlanningState {
             task: task.clone(),
             plan: None,
@@ -101,6 +111,7 @@ impl AgentOrchestrator {
         let context = self.context.build_for_task(&task)?;
         let plan = match self.planner.generate(&task, &context) {
             Ok(p) => {
+                info!(steps = p.steps.len(), "Generated plan");
                 self.update_state(AgentState::Planning(PlanningState {
                     task: task.clone(),
                     plan: Some(p.clone()),
@@ -114,13 +125,17 @@ impl AgentOrchestrator {
         };
 
         // 3. Executing
+        info!("Step 3: executing plan");
         self.update_state(AgentState::Executing(ExecutingState {
             plan: plan.clone(),
             current_step: 0,
         }));
 
         let changes = match self.executor.execute(&plan).await {
-            Ok(c) => c,
+            Ok(c) => {
+                info!(changes = c.file_count(), "Execution complete");
+                c
+            }
             Err(e) => {
                 self.handle_error(format!("Execution failed: {}", e), true);
                 return Err(e);
@@ -129,12 +144,16 @@ impl AgentOrchestrator {
         self.last_changes = Some(changes.clone());
 
         // 4. Verifying
+        info!("Step 4: verifying results");
         self.update_state(AgentState::Verifying(VerifyingState {
             changes: changes.clone(),
         }));
 
         let verification = match self.verifier.verify(&changes).await {
-            Ok(v) => v,
+            Ok(v) => {
+                info!(summary = %v.summary(), "Verification complete");
+                v
+            }
             Err(e) => {
                 self.handle_error(format!("Verification failed: {}", e), true);
                 return Err(e);
@@ -162,11 +181,34 @@ impl AgentOrchestrator {
 
     /// Accept and commit changes (SPEC-041)
     pub fn accept_changes(&mut self) -> Result<()> {
-        if let Some(_) = &self.last_changes {
-            let mut args = HashMap::new();
-            args.insert("action".to_string(), "commit".to_string());
-            args.insert("message".to_string(), "ai: applied changes".to_string());
-            let _ = self.executor.tools.execute("git", &args);
+        if let Some(changes) = &self.last_changes {
+            if !changes.changes.is_empty() {
+                let paths = changes
+                    .changes
+                    .iter()
+                    .map(|change| change.path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                let mut add_args = HashMap::new();
+                add_args.insert("action".to_string(), "add".to_string());
+                add_args.insert("paths".to_string(), paths);
+                let add_output = self.executor.tools.execute("git", &add_args)?;
+                if add_output.exit_code != 0 {
+                    return Err(anyhow::anyhow!("git add failed: {}", add_output.stderr));
+                }
+
+                let mut commit_args = HashMap::new();
+                commit_args.insert("action".to_string(), "commit".to_string());
+                commit_args.insert("message".to_string(), "ai: applied changes".to_string());
+                let commit_output = self.executor.tools.execute("git", &commit_args)?;
+                if commit_output.exit_code != 0 {
+                    return Err(anyhow::anyhow!(
+                        "git commit failed: {}",
+                        commit_output.stderr
+                    ));
+                }
+            }
             self.last_changes = None;
             self.update_state(AgentState::Idle);
         }

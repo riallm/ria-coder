@@ -1,7 +1,8 @@
 //! Tool Registry (SPEC-030)
 
 use anyhow::Result;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 /// Tool categories
 #[derive(Debug, Clone, PartialEq, Eq, Hash, strum::Display)]
@@ -12,6 +13,22 @@ pub enum ToolCategory {
     Test,
     Analysis,
     Search,
+}
+
+/// Tool argument set (SPEC-030)
+#[derive(Debug, Clone, Default)]
+pub struct ToolArgs {
+    pub named: HashMap<String, String>,
+    pub positional: Vec<String>,
+    pub flags: HashSet<String>,
+}
+
+/// Tool parameter metadata
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolParam {
+    pub name: String,
+    pub description: String,
+    pub required: bool,
 }
 
 /// Tool output
@@ -30,12 +47,16 @@ pub trait Tool: Send + Sync {
     fn category(&self) -> ToolCategory;
     fn execute(&self, args: &HashMap<String, String>) -> Result<ToolOutput>;
     fn is_available(&self) -> bool;
+    fn parameters(&self) -> Vec<ToolParam> {
+        Vec::new()
+    }
 }
 
 /// Tool Registry
 pub struct ToolRegistry {
     tools: HashMap<String, Box<dyn Tool>>,
     categories: HashMap<ToolCategory, Vec<String>>,
+    working_dir: Option<PathBuf>,
 }
 
 impl ToolRegistry {
@@ -43,6 +64,7 @@ impl ToolRegistry {
         let mut registry = Self {
             tools: HashMap::new(),
             categories: HashMap::new(),
+            working_dir: None,
         };
 
         registry.register(Box::new(crate::filesystem::FileSystemTools::new()));
@@ -50,8 +72,14 @@ impl ToolRegistry {
         registry.register(Box::new(crate::git::GitTools::new()));
         registry.register(Box::new(crate::build::BuildTools::new()));
         registry.register(Box::new(crate::test::TestTools::new()));
+        registry.register(Box::new(crate::lint::LintTools::new()));
+        registry.register(Box::new(crate::search::SearchTools::new()));
 
         registry
+    }
+
+    pub fn set_working_dir(&mut self, working_dir: PathBuf) {
+        self.working_dir = Some(working_dir);
     }
 
     pub fn register(&mut self, tool: Box<dyn Tool>) {
@@ -64,11 +92,40 @@ impl ToolRegistry {
         self.tools.insert(name, tool);
     }
 
+    pub fn get(&self, name: &str) -> Option<&dyn Tool> {
+        self.tools.get(name).map(|tool| tool.as_ref())
+    }
+
+    pub fn list(&self, category: Option<ToolCategory>) -> Vec<&dyn Tool> {
+        match category {
+            Some(category) => self
+                .categories
+                .get(&category)
+                .into_iter()
+                .flatten()
+                .filter_map(|name| self.get(name))
+                .collect(),
+            None => self.tools.values().map(|tool| tool.as_ref()).collect(),
+        }
+    }
+
     pub fn execute(&self, name: &str, args: &HashMap<String, String>) -> Result<ToolOutput> {
         let tool = self
             .tools
             .get(name)
             .ok_or_else(|| anyhow::anyhow!("Tool not found: {}", name))?;
-        tool.execute(args)
+
+        if !tool.is_available() {
+            return Err(anyhow::anyhow!("Tool not available: {}", name));
+        }
+
+        let mut effective_args = args.clone();
+        if let Some(working_dir) = &self.working_dir {
+            effective_args
+                .entry("cwd".to_string())
+                .or_insert_with(|| working_dir.to_string_lossy().to_string());
+        }
+
+        tool.execute(&effective_args)
     }
 }

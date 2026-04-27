@@ -1,20 +1,20 @@
-//! Test Tools (SPEC-034)
+//! Lint Tools (SPEC-030)
 
 use crate::registry::{Tool, ToolCategory, ToolOutput};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::process::Command;
 
-pub struct TestTools;
+pub struct LintTools;
 
-impl TestTools {
+impl LintTools {
     pub fn new() -> Self {
         Self
     }
 
-    fn run_test(&self, args: &[&str], cwd: Option<&str>) -> Result<(i32, String, String)> {
+    fn run_cargo(&self, args: &[&str], cwd: Option<&str>) -> Result<(i32, String, String)> {
         let mut command = Command::new("cargo");
-        command.arg("test").args(args);
+        command.args(args);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
         }
@@ -28,32 +28,34 @@ impl TestTools {
     }
 }
 
-impl Tool for TestTools {
+impl Tool for LintTools {
     fn name(&self) -> &str {
-        "test"
+        "lint"
     }
+
     fn description(&self) -> &str {
-        "Test system operations"
+        "Linting and formatting operations"
     }
+
     fn category(&self) -> ToolCategory {
-        ToolCategory::Test
+        ToolCategory::Analysis
     }
+
     fn is_available(&self) -> bool {
         Command::new("cargo").arg("--version").output().is_ok()
     }
 
     fn execute(&self, args: &HashMap<String, String>) -> Result<ToolOutput> {
-        let target = args.get("target").map(|s| s.as_str()).unwrap_or("");
+        let action = args.get("action").map(|s| s.as_str()).unwrap_or("clippy");
 
         let start = std::time::Instant::now();
         let cwd = args.get("cwd").map(|s| s.as_str());
 
-        let mut test_args = Vec::new();
-        if !target.is_empty() {
-            test_args.push(target);
-        }
-
-        let (exit_code, stdout, stderr) = self.run_test(&test_args, cwd)?;
+        let (exit_code, stdout, stderr) = match action {
+            "clippy" => self.run_cargo(&["clippy", "--", "-D", "warnings"], cwd)?,
+            "fmt" => self.run_cargo(&["fmt", "--", "--check"], cwd)?,
+            _ => return Err(anyhow::anyhow!("Unknown lint action: {}", action)),
+        };
 
         Ok(ToolOutput {
             exit_code,

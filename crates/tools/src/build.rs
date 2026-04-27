@@ -12,8 +12,13 @@ impl BuildTools {
         Self
     }
 
-    fn run_cargo(&self, args: &[&str]) -> Result<(i32, String, String)> {
-        let output = Command::new("cargo").args(args).output()?;
+    fn run_cargo(&self, args: &[&str], cwd: Option<&str>) -> Result<(i32, String, String)> {
+        let mut command = Command::new("cargo");
+        command.args(args);
+        if let Some(cwd) = cwd {
+            command.current_dir(cwd);
+        }
+        let output = command.output()?;
 
         Ok((
             output.status.code().unwrap_or(0),
@@ -41,11 +46,12 @@ impl Tool for BuildTools {
         let action = args.get("action").map(|s| s.as_str()).unwrap_or("build");
 
         let start = std::time::Instant::now();
+        let cwd = args.get("cwd").map(|s| s.as_str());
 
         let (exit_code, stdout, stderr) = match action {
-            "build" => self.run_cargo(&["build"])?,
-            "check" => self.run_cargo(&["check"])?,
-            "clean" => self.run_cargo(&["clean"])?,
+            "build" => self.run_cargo(&["build"], cwd)?,
+            "check" => self.run_cargo(&["check"], cwd)?,
+            "clean" => self.run_cargo(&["clean"], cwd)?,
             _ => return Err(anyhow::anyhow!("Unknown build action: {}", action)),
         };
 

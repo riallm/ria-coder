@@ -1,5 +1,6 @@
 //! File Preview Panel - Syntax-highlighted code view (SPEC-012)
 
+use crate::syntax::{Language, SyntaxHighlighter};
 use ratatui::{
     layout::Rect,
     widgets::{Block, Borders, Paragraph},
@@ -28,14 +29,29 @@ impl FilePreviewPanel {
         self.current_file = Some(path.to_string());
     }
 
-    pub fn render(&self, frame: &mut Frame, area: Rect) {
+    pub fn render(&self, frame: &mut Frame, area: Rect, highlighter: &SyntaxHighlighter) {
         let title = format!(
             "Preview: {}",
             self.current_file.as_deref().unwrap_or("No file")
         );
         let block = Block::default().borders(Borders::ALL).title(title);
 
-        let paragraph = Paragraph::new(self.content.as_str()).block(block);
+        if self.content.is_empty() {
+            frame.render_widget(Paragraph::new("No content").block(block), area);
+            return;
+        }
+
+        let extension = self
+            .current_file
+            .as_ref()
+            .and_then(|path| std::path::Path::new(path).extension())
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+
+        let language = Language::from_extension(extension);
+        let highlighted_lines = highlighter.highlight(&self.content, &language);
+
+        let paragraph = Paragraph::new(highlighted_lines).block(block);
         frame.render_widget(paragraph, area);
     }
 }
