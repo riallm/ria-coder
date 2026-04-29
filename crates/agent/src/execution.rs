@@ -90,6 +90,47 @@ impl ChangeSet {
         self.changes.len()
     }
 
+    pub fn line_stats(&self) -> (usize, usize) {
+        self.changes
+            .iter()
+            .map(|change| {
+                let original_lines = change.original.lines().count();
+                let modified_lines = change.modified.lines().count();
+                (
+                    modified_lines.saturating_sub(original_lines),
+                    original_lines.saturating_sub(modified_lines),
+                )
+            })
+            .fold((0, 0), |(added_total, removed_total), (added, removed)| {
+                (added_total + added, removed_total + removed)
+            })
+    }
+
+    /// Re-apply changes in this set after an undo (SPEC-042 redo).
+    pub fn apply(&self) -> Result<()> {
+        for change in &self.changes {
+            let path = self.resolve_change_path(&change.path);
+            match change.change_type {
+                ChangeType::Created | ChangeType::Modified => {
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::write(&path, &change.modified)?;
+                }
+                ChangeType::Deleted => {
+                    if path.exists() {
+                        if path.is_dir() {
+                            std::fs::remove_dir_all(&path)?;
+                        } else {
+                            std::fs::remove_file(&path)?;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// Rollback changes in this set (SPEC-042)
     pub fn rollback(&self) -> Result<()> {
         for change in &self.changes {
@@ -97,7 +138,11 @@ impl ChangeSet {
             match change.change_type {
                 ChangeType::Created => {
                     if path.exists() {
-                        std::fs::remove_file(&path)?;
+                        if path.is_dir() {
+                            std::fs::remove_dir_all(&path)?;
+                        } else {
+                            std::fs::remove_file(&path)?;
+                        }
                     }
                 }
                 ChangeType::Modified | ChangeType::Deleted => {
@@ -365,5 +410,74 @@ fn ensure_success(label: &str, output: &ria_tools::registry::ToolOutput) -> Resu
             output.stderr,
             output.stdout
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_root(name: &str) -> PathBuf {
+        let suffix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("ria-coder-{name}-{suffix}"))
+    }
+
+    #[test]
+    fn applies_and_rolls_back_created_file() {
+        let root = temp_root("created");
+        std::fs::create_dir_all(&root).unwrap();
+        let changes = ChangeSet {
+            changes: vec![FileChange {
+                path: "created.txt".to_string(),
+                original: String::new(),
+                modified: "hello\n".to_string(),
+                change_type: ChangeType::Created,
+            }],
+            backup: None,
+            timestamp: Utc::now(),
+            root: Some(root.clone()),
+        };
+
+        changes.apply().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("created.txt")).unwrap(),
+            "hello\n"
+        );
+        changes.rollback().unwrap();
+        assert!(!root.join("created.txt").exists());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn applies_and_rolls_back_modified_file() {
+        let root = temp_root("modified");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("file.txt"), "before\n").unwrap();
+        let changes = ChangeSet {
+            changes: vec![FileChange {
+                path: "file.txt".to_string(),
+                original: "before\n".to_string(),
+                modified: "after\n".to_string(),
+                change_type: ChangeType::Modified,
+            }],
+            backup: None,
+            timestamp: Utc::now(),
+            root: Some(root.clone()),
+        };
+
+        changes.apply().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("file.txt")).unwrap(),
+            "after\n"
+        );
+        changes.rollback().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("file.txt")).unwrap(),
+            "before\n"
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

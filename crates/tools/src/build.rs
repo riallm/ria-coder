@@ -3,6 +3,7 @@
 use crate::registry::{Tool, ToolCategory, ToolOutput};
 use anyhow::Result;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub struct BuildTools;
@@ -12,8 +13,13 @@ impl BuildTools {
         Self
     }
 
-    fn run_cargo(&self, args: &[&str], cwd: Option<&str>) -> Result<(i32, String, String)> {
-        let mut command = Command::new("cargo");
+    fn run_command(
+        &self,
+        program: &str,
+        args: &[&str],
+        cwd: Option<&str>,
+    ) -> Result<(i32, String, String)> {
+        let mut command = Command::new(program);
         command.args(args);
         if let Some(cwd) = cwd {
             command.current_dir(cwd);
@@ -26,6 +32,41 @@ impl BuildTools {
             String::from_utf8_lossy(&output.stderr).to_string(),
         ))
     }
+
+    fn detect_system(cwd: Option<&str>) -> BuildSystem {
+        let root = cwd
+            .map(PathBuf::from)
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+        if root.join("Cargo.toml").exists() {
+            BuildSystem::Cargo
+        } else if root.join("Makefile").exists() || root.join("makefile").exists() {
+            BuildSystem::Make
+        } else if root.join("go.mod").exists() {
+            BuildSystem::Go
+        } else if root.join("package.json").exists() {
+            BuildSystem::Npm
+        } else if root.join("CMakeLists.txt").exists() {
+            BuildSystem::CMake
+        } else {
+            BuildSystem::Unknown
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BuildSystem {
+    Cargo,
+    Make,
+    Go,
+    Npm,
+    CMake,
+    Unknown,
+}
+
+fn command_exists(program: &str) -> bool {
+    Command::new(program).arg("--version").output().is_ok()
+        || Command::new(program).arg("version").output().is_ok()
 }
 
 impl Tool for BuildTools {
@@ -39,7 +80,9 @@ impl Tool for BuildTools {
         ToolCategory::Build
     }
     fn is_available(&self) -> bool {
-        Command::new("cargo").arg("--version").output().is_ok()
+        ["cargo", "make", "go", "npm", "cmake"]
+            .iter()
+            .any(|program| command_exists(program))
     }
 
     fn execute(&self, args: &HashMap<String, String>) -> Result<ToolOutput> {
@@ -47,13 +90,46 @@ impl Tool for BuildTools {
 
         let start = std::time::Instant::now();
         let cwd = args.get("cwd").map(|s| s.as_str());
+        let system = args
+            .get("system")
+            .map(|system| match system.as_str() {
+                "cargo" => BuildSystem::Cargo,
+                "make" => BuildSystem::Make,
+                "go" => BuildSystem::Go,
+                "npm" => BuildSystem::Npm,
+                "cmake" => BuildSystem::CMake,
+                _ => BuildSystem::Unknown,
+            })
+            .unwrap_or_else(|| Self::detect_system(cwd));
 
-        let (exit_code, stdout, stderr) = match action {
-            "build" => self.run_cargo(&["build"], cwd)?,
-            "check" => self.run_cargo(&["check"], cwd)?,
-            "clean" => self.run_cargo(&["clean"], cwd)?,
-            _ => return Err(anyhow::anyhow!("Unknown build action: {}", action)),
+        let (program, command_args): (&str, Vec<&str>) = match (system, action) {
+            (BuildSystem::Cargo, "build") => ("cargo", vec!["build"]),
+            (BuildSystem::Cargo, "check") => ("cargo", vec!["check"]),
+            (BuildSystem::Cargo, "clean") => ("cargo", vec!["clean"]),
+            (BuildSystem::Make, "build" | "check") => ("make", Vec::new()),
+            (BuildSystem::Make, "clean") => ("make", vec!["clean"]),
+            (BuildSystem::Go, "build" | "check") => ("go", vec!["build", "./..."]),
+            (BuildSystem::Go, "clean") => ("go", vec!["clean"]),
+            (BuildSystem::Npm, "build" | "check") => ("npm", vec!["run", "build"]),
+            (BuildSystem::Npm, "clean") => ("npm", vec!["run", "clean"]),
+            (BuildSystem::CMake, "build" | "check") => ("cmake", vec!["--build", "."]),
+            (BuildSystem::CMake, "clean") => ("cmake", vec!["--build", ".", "--target", "clean"]),
+            (BuildSystem::Unknown, _) => {
+                return Ok(ToolOutput {
+                    exit_code: 1,
+                    stdout: String::new(),
+                    stderr: format!(
+                        "No supported build system found in {}",
+                        cwd.map(Path::new)
+                            .unwrap_or_else(|| Path::new("."))
+                            .display()
+                    ),
+                    duration: start.elapsed(),
+                });
+            }
+            (_, other) => return Err(anyhow::anyhow!("Unknown build action: {}", other)),
         };
+        let (exit_code, stdout, stderr) = self.run_command(program, &command_args, cwd)?;
 
         Ok(ToolOutput {
             exit_code,

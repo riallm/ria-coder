@@ -2,7 +2,7 @@
 
 use crate::execution::ChangeSet;
 use anyhow::Result;
-use ria_tools::registry::ToolRegistry;
+use ria_tools::registry::{ToolOutput, ToolRegistry};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -18,10 +18,30 @@ pub enum VerificationStatus {
 #[derive(Debug)]
 pub struct VerificationResult {
     pub status: VerificationStatus,
+    pub syntax_check: CheckResult,
+    pub build_result: CheckResult,
+    pub test_result: CheckResult,
+    pub lint_result: CheckResult,
+    pub format_result: CheckResult,
     pub build_pass: bool,
     pub test_pass: bool,
     pub lint_pass: bool,
     pub test_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckResult {
+    pub name: String,
+    pub status: CheckStatus,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CheckStatus {
+    Pass,
+    Warning,
+    Fail,
+    Skipped,
 }
 
 impl VerificationResult {
@@ -33,12 +53,27 @@ impl VerificationResult {
     }
 
     pub fn summary(&self) -> String {
+        let checks = [
+            &self.syntax_check,
+            &self.build_result,
+            &self.test_result,
+            &self.lint_result,
+            &self.format_result,
+        ];
+        let check_lines = checks
+            .iter()
+            .map(|check| format!("{}: {}", check.name, check.message))
+            .collect::<Vec<_>>()
+            .join("; ");
+
         match &self.status {
-            VerificationStatus::Pass => "All checks passed".to_string(),
+            VerificationStatus::Pass => format!("All checks passed ({check_lines})"),
             VerificationStatus::Warning { messages } => {
-                format!("Passed with {} warnings", messages.len())
+                format!("Passed with {} warnings ({check_lines})", messages.len())
             }
-            VerificationStatus::Fail { errors } => format!("Failed with {} errors", errors.len()),
+            VerificationStatus::Fail { errors } => {
+                format!("Failed with {} errors ({check_lines})", errors.len())
+            }
         }
     }
 
@@ -71,6 +106,11 @@ impl VerificationEngine {
         if changes.changes.is_empty() {
             return Ok(VerificationResult {
                 status: VerificationStatus::Pass,
+                syntax_check: CheckResult::pass("Syntax", "No changes"),
+                build_result: CheckResult::pass("Build", "No changes"),
+                test_result: CheckResult::pass("Tests", "No changes"),
+                lint_result: CheckResult::pass("Lint", "No changes"),
+                format_result: CheckResult::pass("Format", "No changes"),
                 build_pass: true,
                 test_pass: true,
                 lint_pass: true,
@@ -78,52 +118,41 @@ impl VerificationEngine {
             });
         }
 
-        if !self.has_cargo_project() {
-            return Ok(VerificationResult {
-                status: VerificationStatus::Warning {
-                    messages: vec![
-                        "No Cargo.toml found; skipped Rust build, test, and lint checks"
-                            .to_string(),
-                    ],
-                },
-                build_pass: true,
-                test_pass: true,
-                lint_pass: true,
-                test_count: None,
-            });
-        }
-
         let mut errors = Vec::new();
         let mut warnings = Vec::new();
+        let syntax_check = self.verify_syntax(changes);
+        collect_check(&syntax_check, &mut errors, &mut warnings);
 
         let build_output = self.run_tool("build", &[("action", "check")])?;
         let build_pass = build_output.exit_code == 0;
-        if !build_pass {
-            errors.push(format!(
-                "cargo check failed: {}{}",
-                build_output.stderr, build_output.stdout
-            ));
-        }
+        let build_result = result_from_output("Build", &build_output, "Build succeeded");
+        collect_check(&build_result, &mut errors, &mut warnings);
 
         let test_output = self.run_tool("test", &[])?;
         let test_pass = test_output.exit_code == 0;
         let test_count =
             parse_cargo_test_count(&format!("{}\n{}", test_output.stdout, test_output.stderr));
-        if !test_pass {
-            errors.push(format!(
-                "cargo test failed: {}{}",
-                test_output.stderr, test_output.stdout
-            ));
-        }
+        let test_message = test_count
+            .map(|count| format!("{count} tests passed"))
+            .unwrap_or_else(|| "Tests passed".to_string());
+        let test_result = result_from_output("Tests", &test_output, &test_message);
+        collect_check(&test_result, &mut errors, &mut warnings);
 
-        let fmt_output = self.run_tool("lint", &[("action", "fmt")])?;
-        let lint_pass = fmt_output.exit_code == 0;
-        if !lint_pass {
-            warnings.push(format!(
-                "cargo fmt --check reported formatting changes: {}{}",
-                fmt_output.stderr, fmt_output.stdout
-            ));
-        }
+        let (lint_result, format_result) = if self.has_cargo_project() {
+            let clippy_output = self.run_tool("lint", &[("action", "clippy")])?;
+            let fmt_output = self.run_tool("lint", &[("action", "fmt")])?;
+            (
+                result_from_output("Lint", &clippy_output, "Clippy passed"),
+                warning_from_output("Format", &fmt_output, "Format clean"),
+            )
+        } else {
+            (
+                CheckResult::skipped("Lint", "No Cargo.toml; lint skipped"),
+                CheckResult::skipped("Format", "No Cargo.toml; format skipped"),
+            )
+        };
+        collect_check(&lint_result, &mut errors, &mut warnings);
+        collect_check(&format_result, &mut errors, &mut warnings);
 
         let status = if !errors.is_empty() {
             VerificationStatus::Fail { errors }
@@ -132,9 +161,21 @@ impl VerificationEngine {
         } else {
             VerificationStatus::Pass
         };
+        let lint_pass = matches!(
+            lint_result.status,
+            CheckStatus::Pass | CheckStatus::Warning | CheckStatus::Skipped
+        ) && matches!(
+            format_result.status,
+            CheckStatus::Pass | CheckStatus::Warning | CheckStatus::Skipped
+        );
 
         Ok(VerificationResult {
             status,
+            syntax_check,
+            build_result,
+            test_result,
+            lint_result,
+            format_result,
             build_pass,
             test_pass,
             lint_pass,
@@ -149,17 +190,123 @@ impl VerificationEngine {
             .unwrap_or_else(|| PathBuf::from("Cargo.toml").exists())
     }
 
-    fn run_tool(
-        &self,
-        tool: &str,
-        pairs: &[(&str, &str)],
-    ) -> Result<ria_tools::registry::ToolOutput> {
+    fn run_tool(&self, tool: &str, pairs: &[(&str, &str)]) -> Result<ToolOutput> {
         let mut args = HashMap::new();
         for (key, value) in pairs {
             args.insert((*key).to_string(), (*value).to_string());
         }
         self.tools.execute(tool, &args)
     }
+
+    fn verify_syntax(&self, changes: &ChangeSet) -> CheckResult {
+        for change in &changes.changes {
+            if change.modified.is_empty() {
+                continue;
+            }
+
+            let path = PathBuf::from(&change.path);
+            match path.extension().and_then(|extension| extension.to_str()) {
+                Some("json") => {
+                    if let Err(error) = serde_json::from_str::<serde_json::Value>(&change.modified)
+                    {
+                        return CheckResult::fail(
+                            "Syntax",
+                            format!("{} JSON parse failed: {}", change.path, error),
+                        );
+                    }
+                }
+                Some("toml") => {
+                    if let Err(error) = toml::from_str::<toml::Value>(&change.modified) {
+                        return CheckResult::fail(
+                            "Syntax",
+                            format!("{} TOML parse failed: {}", change.path, error),
+                        );
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        CheckResult::pass("Syntax", "Changed structured files parse")
+    }
+}
+
+impl CheckResult {
+    fn pass(name: &str, message: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: CheckStatus::Pass,
+            message: message.into(),
+        }
+    }
+
+    fn warning(name: &str, message: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: CheckStatus::Warning,
+            message: message.into(),
+        }
+    }
+
+    fn fail(name: &str, message: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: CheckStatus::Fail,
+            message: message.into(),
+        }
+    }
+
+    fn skipped(name: &str, message: impl Into<String>) -> Self {
+        Self {
+            name: name.to_string(),
+            status: CheckStatus::Skipped,
+            message: message.into(),
+        }
+    }
+}
+
+fn result_from_output(name: &str, output: &ToolOutput, pass_message: &str) -> CheckResult {
+    if output.exit_code == 0 {
+        CheckResult::pass(name, pass_message)
+    } else if output.stderr.contains("No supported") {
+        CheckResult::skipped(
+            name,
+            first_nonempty_line(&output.stderr).unwrap_or("Skipped"),
+        )
+    } else {
+        CheckResult::fail(
+            name,
+            first_nonempty_line(&output.stderr)
+                .or_else(|| first_nonempty_line(&output.stdout))
+                .unwrap_or("Command failed"),
+        )
+    }
+}
+
+fn warning_from_output(name: &str, output: &ToolOutput, pass_message: &str) -> CheckResult {
+    if output.exit_code == 0 {
+        CheckResult::pass(name, pass_message)
+    } else {
+        CheckResult::warning(
+            name,
+            first_nonempty_line(&output.stderr)
+                .or_else(|| first_nonempty_line(&output.stdout))
+                .unwrap_or("Check reported warnings"),
+        )
+    }
+}
+
+fn collect_check(check: &CheckResult, errors: &mut Vec<String>, warnings: &mut Vec<String>) {
+    match check.status {
+        CheckStatus::Fail => errors.push(format!("{}: {}", check.name, check.message)),
+        CheckStatus::Warning => warnings.push(format!("{}: {}", check.name, check.message)),
+        CheckStatus::Skipped => warnings.push(format!("{}: {}", check.name, check.message)),
+        CheckStatus::Pass => {}
+    }
+}
+
+fn first_nonempty_line(output: &str) -> Option<&str> {
+    output.lines().map(str::trim).find(|line| !line.is_empty())
 }
 
 fn parse_cargo_test_count(output: &str) -> Option<usize> {
@@ -177,4 +324,27 @@ fn parse_cargo_test_count(output: &str) -> Option<usize> {
             .last()
             .and_then(|value| value.parse::<usize>().ok())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_cargo_test_count() {
+        let output = "test result: ok. 47 passed; 0 failed; 0 ignored";
+        assert_eq!(parse_cargo_test_count(output), Some(47));
+    }
+
+    #[test]
+    fn marks_unsupported_tools_as_skipped() {
+        let output = ToolOutput {
+            exit_code: 1,
+            stdout: String::new(),
+            stderr: "No supported build system found in .".to_string(),
+            duration: std::time::Duration::from_millis(1),
+        };
+        let result = result_from_output("Build", &output, "Build succeeded");
+        assert_eq!(result.status, CheckStatus::Skipped);
+    }
 }

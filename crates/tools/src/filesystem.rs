@@ -56,6 +56,22 @@ impl FileSystemTools {
         }
         diff
     }
+
+    fn trash_path(path: &Path, args: &HashMap<String, String>) -> PathBuf {
+        let root = args
+            .get("cwd")
+            .map(PathBuf::from)
+            .or_else(|| path.parent().map(Path::to_path_buf))
+            .unwrap_or_else(|| PathBuf::from("."));
+        let file_name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("deleted");
+        let timestamp = chrono::Utc::now().format("%Y%m%d%H%M%S%3f");
+        root.join(".ria-coder")
+            .join("trash")
+            .join(format!("{timestamp}-{file_name}"))
+    }
 }
 
 impl Tool for FileSystemTools {
@@ -176,6 +192,10 @@ impl Tool for FileSystemTools {
                     .get("force")
                     .map(|value| value == "true")
                     .unwrap_or(false);
+                let permanent = args
+                    .get("permanent")
+                    .map(|value| value == "true")
+                    .unwrap_or(false);
                 if path.is_dir() && !force {
                     (
                         String::new(),
@@ -185,6 +205,25 @@ impl Tool for FileSystemTools {
                         ),
                         1,
                     )
+                } else if !path.exists() {
+                    (
+                        String::new(),
+                        format!("Path does not exist: {}", path.display()),
+                        1,
+                    )
+                } else if !permanent {
+                    let trash_path = Self::trash_path(&path, args);
+                    if let Some(parent) = trash_path.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    match std::fs::rename(&path, &trash_path) {
+                        Ok(_) => (
+                            format!("Moved {} to {}", path.display(), trash_path.display()),
+                            String::new(),
+                            0,
+                        ),
+                        Err(e) => (String::new(), e.to_string(), 1),
+                    }
                 } else if path.is_dir() {
                     match std::fs::remove_dir_all(&path) {
                         Ok(_) => (format!("Deleted {}", path.display()), String::new(), 0),

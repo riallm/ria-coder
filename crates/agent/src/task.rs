@@ -181,12 +181,8 @@ Respond ONLY with valid JSON."#;
     fn extract_targets(input: &str) -> Vec<TargetSpec> {
         let mut targets = Vec::new();
         for token in input.split_whitespace().map(clean_token) {
-            if looks_like_path(&token) {
-                targets.push(TargetSpec {
-                    path: Some(token),
-                    symbol: None,
-                    line_range: None,
-                });
+            if let Some(target) = parse_path_target(&token) {
+                targets.push(target);
             }
         }
 
@@ -199,6 +195,18 @@ Respond ONLY with valid JSON."#;
                 targets.push(TargetSpec {
                     path: None,
                     symbol: Some(window[1].clone()),
+                    line_range: None,
+                });
+            } else if matches!(
+                window[1].to_lowercase().as_str(),
+                "function" | "fn" | "struct" | "enum" | "trait" | "symbol"
+            ) && !matches!(
+                window[0].to_lowercase().as_str(),
+                "the" | "a" | "an" | "this"
+            ) {
+                targets.push(TargetSpec {
+                    path: None,
+                    symbol: Some(window[0].clone()),
                     line_range: None,
                 });
             }
@@ -298,6 +306,37 @@ fn looks_like_path(token: &str) -> bool {
         || token.ends_with(".jsx")
 }
 
+fn parse_path_target(token: &str) -> Option<TargetSpec> {
+    if token.is_empty() {
+        return None;
+    }
+
+    let (path, line_range) = match token.split_once(':') {
+        Some((path, line_spec)) if looks_like_path(path) => {
+            (path.to_string(), parse_line_range(line_spec))
+        }
+        _ if looks_like_path(token) => (token.to_string(), None),
+        _ => return None,
+    };
+
+    Some(TargetSpec {
+        path: Some(path),
+        symbol: None,
+        line_range,
+    })
+}
+
+fn parse_line_range(value: &str) -> Option<(usize, usize)> {
+    if let Some((start, end)) = value.split_once('-') {
+        let start = start.parse::<usize>().ok()?;
+        let end = end.parse::<usize>().ok()?;
+        Some((start.min(end), start.max(end)))
+    } else {
+        let line = value.parse::<usize>().ok()?;
+        Some((line, line))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,5 +366,18 @@ mod tests {
         assert!(task.constraints.contains(&Constraint::WithTests));
         assert!(task.constraints.contains(&Constraint::KeepApiStable));
         assert_eq!(task.targets[0].path.as_deref(), Some("src/config.rs"));
+    }
+
+    #[test]
+    fn extracts_line_range_targets() {
+        let task = TaskParser::parse("review src/main.rs:10-20").unwrap();
+        assert_eq!(task.targets[0].path.as_deref(), Some("src/main.rs"));
+        assert_eq!(task.targets[0].line_range, Some((10, 20)));
+    }
+
+    #[test]
+    fn extracts_implicit_symbol_targets() {
+        let task = TaskParser::parse("add error handling to main function").unwrap();
+        assert_eq!(task.targets[0].symbol.as_deref(), Some("main"));
     }
 }

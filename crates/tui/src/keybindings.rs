@@ -14,6 +14,7 @@ pub enum Action {
     AcceptChanges,
     RejectChanges,
     ToggleLayout,
+    OutputLog,
     Quit,
     Cancel,
     ForceQuit,
@@ -94,6 +95,16 @@ impl Default for KeyBindings {
                     key: KeyCode::F(7),
                     modifiers: KeyModifiers::NONE,
                     action: Action::RejectChanges,
+                },
+                KeyBinding {
+                    key: KeyCode::F(8),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::ToggleLayout,
+                },
+                KeyBinding {
+                    key: KeyCode::F(9),
+                    modifiers: KeyModifiers::NONE,
+                    action: Action::OutputLog,
                 },
                 KeyBinding {
                     key: KeyCode::F(10),

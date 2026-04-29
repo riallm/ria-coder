@@ -72,11 +72,17 @@ impl Tool for GitTools {
                 self.run_git(&["checkout", name], cwd)?
             }
             "add" => {
-                let paths = args
-                    .get("paths")
-                    .ok_or_else(|| anyhow::anyhow!("Missing paths"))?;
-                let mut git_args = vec!["add"];
-                git_args.extend(paths.split_whitespace());
+                let path_values = if let Some(paths_json) = args.get("paths_json") {
+                    serde_json::from_str::<Vec<String>>(paths_json)?
+                } else {
+                    let paths = args
+                        .get("paths")
+                        .ok_or_else(|| anyhow::anyhow!("Missing paths"))?;
+                    paths.split_whitespace().map(ToString::to_string).collect()
+                };
+                let mut git_args = vec!["add".to_string()];
+                git_args.extend(path_values);
+                let git_args = git_args.iter().map(String::as_str).collect::<Vec<_>>();
                 self.run_git(&git_args, cwd)?
             }
             "commit" => {

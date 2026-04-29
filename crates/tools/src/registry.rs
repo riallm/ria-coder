@@ -23,6 +23,19 @@ pub struct ToolArgs {
     pub flags: HashSet<String>,
 }
 
+impl ToolArgs {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_named(named: HashMap<String, String>) -> Self {
+        Self {
+            named,
+            ..Self::default()
+        }
+    }
+}
+
 /// Tool parameter metadata
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolParam {
@@ -32,7 +45,7 @@ pub struct ToolParam {
 }
 
 /// Tool output
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ToolOutput {
     pub exit_code: i32,
     pub stdout: String,
@@ -96,6 +109,10 @@ impl ToolRegistry {
         self.tools.get(name).map(|tool| tool.as_ref())
     }
 
+    pub fn contains(&self, name: &str) -> bool {
+        self.tools.contains_key(name)
+    }
+
     pub fn list(&self, category: Option<ToolCategory>) -> Vec<&dyn Tool> {
         match category {
             Some(category) => self
@@ -110,6 +127,21 @@ impl ToolRegistry {
     }
 
     pub fn execute(&self, name: &str, args: &HashMap<String, String>) -> Result<ToolOutput> {
+        self.execute_named(name, args)
+    }
+
+    pub fn execute_args(&self, name: &str, args: &ToolArgs) -> Result<ToolOutput> {
+        let mut named = args.named.clone();
+        if !args.positional.is_empty() {
+            named.insert("args".to_string(), args.positional.join(" "));
+        }
+        for flag in &args.flags {
+            named.insert(flag.clone(), "true".to_string());
+        }
+        self.execute_named(name, &named)
+    }
+
+    fn execute_named(&self, name: &str, args: &HashMap<String, String>) -> Result<ToolOutput> {
         let tool = self
             .tools
             .get(name)

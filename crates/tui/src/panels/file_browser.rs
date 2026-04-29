@@ -44,12 +44,18 @@ impl FileBrowserPanel {
             }
         }
         self.items.sort();
-        if !self.items.is_empty() && self.state.selected().is_none() {
+        if self.items.is_empty() {
+            self.state.select(None);
+        } else if self.state.selected().is_none() {
             self.state.select(Some(0));
         }
     }
 
     pub fn next(&mut self) {
+        if self.items.is_empty() {
+            self.state.select(None);
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -64,6 +70,10 @@ impl FileBrowserPanel {
     }
 
     pub fn previous(&mut self) {
+        if self.items.is_empty() {
+            self.state.select(None);
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {

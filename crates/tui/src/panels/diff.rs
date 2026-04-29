@@ -32,7 +32,9 @@ impl DiffPanel {
         // In a real app we'd use a diffing library
         let mut items = Vec::new();
 
-        if self.original.is_empty() && !self.modified.is_empty() {
+        if self.original.is_empty() && self.modified.is_empty() {
+            items.push(ListItem::new("No pending changes"));
+        } else if self.original.is_empty() && !self.modified.is_empty() {
             // New file
             for line in self.modified.lines() {
                 items.push(
@@ -63,6 +65,13 @@ impl DiffPanel {
                     items.push(
                         ListItem::new(format!("+{}", line))
                             .style(Style::default().fg(Color::Green)),
+                    );
+                }
+            }
+            if orig_lines.len() > mod_lines.len() {
+                for line in orig_lines.iter().skip(mod_lines.len()) {
+                    items.push(
+                        ListItem::new(format!("-{}", line)).style(Style::default().fg(Color::Red)),
                     );
                 }
             }

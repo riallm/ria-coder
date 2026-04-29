@@ -137,26 +137,29 @@ async fn main() -> Result<()> {
 }
 
 /// Start interactive coding session
-async fn cmd_coder(
-    _model: Option<&str>,
-    root: Option<&str>,
-    _theme: &str,
-    _vim: bool,
-) -> Result<()> {
-    use ria_agent::llm::MockLLMEngine;
+async fn cmd_coder(model: Option<&str>, root: Option<&str>, theme: &str, vim: bool) -> Result<()> {
     use ria_agent::orchestrator::AgentOrchestrator;
     use ria_tui::{App, Theme};
+    let config = load_config();
 
     let project_root = match root {
         Some(r) => PathBuf::from(r),
         None => std::env::current_dir()?,
     };
+    let model_path = model.or(config.model.path.as_deref());
 
+    let _theme_name = if theme == "default" {
+        config.ui.theme.as_str()
+    } else {
+        theme
+    };
     let theme = Theme::default();
-    let llm = Box::new(MockLLMEngine::new());
-    let orchestrator = AgentOrchestrator::new(llm);
+    let llm = load_llm(model_path).await?;
+    let mut orchestrator = AgentOrchestrator::new(llm);
+    orchestrator.max_iterations = config.agent.max_iterations;
 
     let mut app = App::new(theme, project_root, orchestrator)?;
+    app.keybindings.vim_mode = vim;
 
     app.run()?;
 
@@ -165,28 +168,52 @@ async fn cmd_coder(
 
 /// Generate code from prompt
 async fn cmd_generate(
-    _model: Option<&str>,
+    model: Option<&str>,
     root: Option<&str>,
     prompt: &str,
-    _max_tokens: usize,
+    max_tokens: usize,
     temperature: f64,
 ) -> Result<()> {
-    use ria_agent::llm::MockLLMEngine;
+    use ria_agent::llm::GenConfig;
     use ria_agent::orchestrator::AgentOrchestrator;
+    let config = load_config();
 
     let project_root = match root {
         Some(r) => PathBuf::from(r),
         None => std::env::current_dir()?,
     };
+    let model_path = model.or(config.model.path.as_deref());
 
-    println!("🤖 Generating with mock-ria-8b (temp={})...", temperature);
+    println!(
+        "🤖 Generating with {} (temp={}, max_tokens={})...",
+        model_path.unwrap_or("mock-ria-8b"),
+        temperature,
+        max_tokens
+    );
     println!("📁 Project: {:?}", project_root);
     println!("Prompt: {}", prompt);
     println!();
 
-    let llm = Box::new(MockLLMEngine::new());
+    let llm = load_llm(model_path).await?;
     let mut orchestrator = AgentOrchestrator::new(llm);
+    orchestrator.max_iterations = config.agent.max_iterations;
     orchestrator.init(project_root)?;
+
+    if prompt.starts_with("raw:") {
+        let output = orchestrator
+            .llm
+            .generate(
+                prompt.trim_start_matches("raw:").trim(),
+                &GenConfig {
+                    max_tokens,
+                    temperature,
+                    ..Default::default()
+                },
+            )
+            .await?;
+        println!("{}", output);
+        return Ok(());
+    }
 
     let output = orchestrator.process_request(prompt).await?;
 
@@ -203,8 +230,11 @@ async fn cmd_generate(
 
 /// Inspect GGUF model
 fn cmd_inspect(model: &str) -> Result<()> {
-    println!("📋 Inspecting: {}", model);
-    // Use ria-gguf to parse and display metadata
+    let path = PathBuf::from(model);
+    let metadata = std::fs::metadata(&path)?;
+    println!("📋 Inspecting: {}", path.display());
+    println!("Size: {:.2} MB", metadata.len() as f64 / 1_048_576.0);
+    println!("Readonly: {}", metadata.permissions().readonly());
     Ok(())
 }
 
@@ -234,4 +264,18 @@ fn cmd_config(show_path: bool) -> Result<()> {
         println!("{}", toml::to_string_pretty(&config)?);
     }
     Ok(())
+}
+
+fn load_config() -> ria_config::Config {
+    let path = ria_config::Config::default_path();
+    ria_config::Config::load(&path).unwrap_or_default()
+}
+
+async fn load_llm(model: Option<&str>) -> Result<Box<dyn ria_agent::llm::LLMEngine>> {
+    match model {
+        Some(model_path) => Ok(Box::new(
+            ria_agent::llm::RiaLLMEngine::new(model_path).await?,
+        )),
+        None => Ok(Box::new(ria_agent::llm::MockLLMEngine::new())),
+    }
 }

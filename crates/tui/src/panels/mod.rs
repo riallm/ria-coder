@@ -16,4 +16,4 @@ pub use diff::DiffPanel;
 pub use file_browser::FileBrowserPanel;
 pub use file_preview::FilePreviewPanel;
 pub use git_status::GitStatusPanel;
-pub use output_log::OutputLogPanel;
+pub use output_log::{LogKind, OutputLogPanel};

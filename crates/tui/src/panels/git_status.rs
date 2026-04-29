@@ -31,14 +31,25 @@ impl GitStatusPanel {
             for line in output.stdout.lines() {
                 self.items.push(line.to_string());
             }
+            if self.items.is_empty() && output.exit_code == 0 {
+                self.items.push("Working tree clean".to_string());
+            } else if output.exit_code != 0 {
+                self.items.push(output.stderr);
+            }
         }
 
-        if !self.items.is_empty() && self.state.selected().is_none() {
+        if self.items.is_empty() {
+            self.state.select(None);
+        } else if self.state.selected().is_none() {
             self.state.select(Some(0));
         }
     }
 
     pub fn next(&mut self) {
+        if self.items.is_empty() {
+            self.state.select(None);
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
                 if i >= self.items.len() - 1 {
@@ -53,6 +64,10 @@ impl GitStatusPanel {
     }
 
     pub fn previous(&mut self) {
+        if self.items.is_empty() {
+            self.state.select(None);
+            return;
+        }
         let i = match self.state.selected() {
             Some(i) => {
                 if i == 0 {
